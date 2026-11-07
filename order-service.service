@@ -1,0 +1,17 @@
+[Unit]
+Description=Order Service Production Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=tdouthat
+WorkingDirectory=/home/tdouthat
+ExecStart=/opt/order_service/bin/order-service-daemon
+Restart=always
+RestartSec=3s
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

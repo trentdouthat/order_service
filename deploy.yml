@@ -1,0 +1,108 @@
+---
+# ==============================================================================
+# deploy.yml - Multi-Node Promotion Playbook (Staging & Production)
+# ==============================================================================
+
+- name: Deploy order_service to Target Fleet
+  hosts: all
+  gather_facts: true
+
+  vars:
+    artifact_name: "order_service-0.1.0-py3-none-any.whl"
+    artifact_local_path: "dist/order_service-0.1.0-py3-none-any.whl"
+
+  tasks:
+    # --------------------------------------------------------------------------
+    # Task 1: Audit Target Architecture & OS
+    # --------------------------------------------------------------------------
+    - name: Display target node hardware and OS facts
+      ansible.builtin.debug:
+        msg: "Connected to {{ inventory_hostname }} ({{ ansible_facts['distribution'] }} on {{ ansible_facts['architecture'] }})"
+
+    # --------------------------------------------------------------------------
+    # Task 2: Ensure Target Directory Structure Exists
+    # --------------------------------------------------------------------------
+    - name: Ensure /opt/order_service directory exists
+      ansible.builtin.file:
+        path: "{{ install_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+      become: true
+
+    # --------------------------------------------------------------------------
+    # Task 3: Ensure Dedicated Python Virtual Environment Exists
+    # --------------------------------------------------------------------------
+    - name: Create Python virtual environment if not present
+      ansible.builtin.command:
+        cmd: "/usr/bin/python3 -m venv {{ install_dir }}"
+        creates: "{{ install_dir }}/bin/python3"
+
+    # --------------------------------------------------------------------------
+    # Task 4: Push Immutable Wheel Artifact
+    # --------------------------------------------------------------------------
+    - name: Transfer wheel artifact to target /tmp
+      ansible.builtin.copy:
+        src: "{{ artifact_local_path }}"
+        dest: "/tmp/{{ artifact_name }}"
+        mode: '0644'
+
+    # --------------------------------------------------------------------------
+    # Task 5: Install Wheel into Dedicated Runtime
+    # --------------------------------------------------------------------------
+    - name: Install wheel into runtime virtual environment
+      ansible.builtin.pip:
+        name: "/tmp/{{ artifact_name }}"
+        virtualenv: "{{ install_dir }}"
+        extra_args: "--force-reinstall --no-cache-dir"
+
+    # --------------------------------------------------------------------------
+    # Task 6: Deploy Systemd Service Unit
+    # --------------------------------------------------------------------------
+    - name: Deploy systemd unit definition
+      ansible.builtin.template:
+        src: order-service.service.j2
+        dest: /etc/systemd/system/order-service.service
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+      notify: Reload Systemd
+
+    # --------------------------------------------------------------------------
+    # Task 7: Ensure Daemon is Enabled and Running
+    # --------------------------------------------------------------------------
+    - name: Ensure order-service daemon is running and enabled
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      become: true
+
+    # --------------------------------------------------------------------------
+    # Task 8: Local Health Check (Liveness Probe)
+    # --------------------------------------------------------------------------
+    - name: Probe live HTTP endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080/healthz"
+        status_code: 200
+        return_content: true
+      register: health_result
+      retries: 3
+      delay: 1
+      until: health_result.status == 200
+
+    - name: Report verification result
+      ansible.builtin.debug:
+        msg: "Health check passed on {{ inventory_hostname }}: {{ health_result.json }}"
+
+  # ----------------------------------------------------------------------------
+  # Handlers: Triggered only when configuration files change
+  # ----------------------------------------------------------------------------
+  handlers:
+    - name: Reload Systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
