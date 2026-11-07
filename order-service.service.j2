@@ -1,0 +1,17 @@
+[Unit]
+Description=Order Service Production Daemon
+After=network.target
+
+[Service]
+Type=simple
+User={{ ansible_user }}
+WorkingDirectory=/home/{{ ansible_user }}
+ExecStart={{ install_dir }}/current/bin/order-service-daemon
+Restart=always
+RestartSec=3s
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

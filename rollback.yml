@@ -1,0 +1,47 @@
+---
+# ==============================================================================
+# rollback.yml - Sub-Second Emergency Rollback Playbook
+# ==============================================================================
+
+- name: Emergency Rollback to Previous Known-Good Release
+  hosts: all
+  gather_facts: false
+
+  vars:
+    base_dir: "{{ install_dir | default('/opt/order_service') }}"
+
+  tasks:
+    - name: Inspect previous release pointer
+      ansible.builtin.stat:
+        path: "{{ base_dir }}/previous"
+      register: prev_stat
+
+    - name: Abort if no previous release is found
+      ansible.builtin.fail:
+        msg: "Rollback aborted: No '{{ base_dir }}/previous' pointer exists!"
+      when: not prev_stat.stat.exists
+
+    - name: Atomically revert 'current' symlink to previous release
+      ansible.builtin.file:
+        src: "{{ prev_stat.stat.lnk_target }}"
+        dest: "{{ base_dir }}/current"
+        state: link
+        force: true
+      become: true
+
+    - name: Restart daemon on restored binary
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted
+      become: true
+
+    - name: Verify health on rolled back version
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080/healthz"
+        status_code: 200
+        return_content: true
+      register: rollback_health
+
+    - name: Confirm rollback success
+      ansible.builtin.debug:
+        msg: "CRITICAL RECOVERY: {{ inventory_hostname }} rolled back to {{ prev_stat.stat.lnk_target }} (Health: {{ rollback_health.json.status }})"

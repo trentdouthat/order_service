@@ -1,0 +1,23 @@
+[project]
+name = "order-service"
+version = "0.3.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Trent Douthat", email = "trent@trentdouthat.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+order-service = "order_service:main"
+order-service-daemon = "order_service.server:run"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

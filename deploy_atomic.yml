@@ -1,0 +1,124 @@
+---
+# ==============================================================================
+# deploy_atomic.yml - Zero-Downtime Atomic Symlink Deployment Playbook
+# ==============================================================================
+
+- name: Deploy Versioned Release via Atomic Symlink
+  hosts: all
+  gather_facts: true
+
+  vars:
+    release_version: "{{ version | default('0.1.0') }}"
+    artifact_name: "order_service-{{ release_version }}-py3-none-any.whl"
+    artifact_local_path: "dist/{{ artifact_name }}"
+    base_dir: "{{ install_dir | default('/opt/order_service') }}"
+    releases_dir: "{{ base_dir }}/releases"
+    target_release_dir: "{{ releases_dir }}/{{ release_version }}"
+
+  tasks:
+    # --------------------------------------------------------------------------
+    # Task 1: Ensure Directory Hierarchy Exists
+    # --------------------------------------------------------------------------
+    - name: Ensure base releases directory exists
+      ansible.builtin.file:
+        path: "{{ releases_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+      become: true
+
+    # --------------------------------------------------------------------------
+    # Task 2: Create Isolated Virtualenv for This Specific Version
+    # --------------------------------------------------------------------------
+    - name: Create versioned release virtual environment
+      ansible.builtin.command:
+        cmd: "/usr/bin/python3 -m venv {{ target_release_dir }}"
+        creates: "{{ target_release_dir }}/bin/python3"
+
+    # --------------------------------------------------------------------------
+    # Task 3: Transfer Wheel Artifact
+    # --------------------------------------------------------------------------
+    - name: Transfer wheel artifact to target /tmp
+      ansible.builtin.copy:
+        src: "{{ artifact_local_path }}"
+        dest: "/tmp/{{ artifact_name }}"
+        mode: '0644'
+
+    # --------------------------------------------------------------------------
+    # Task 4: Install Wheel into Versioned Virtualenv (Isolated)
+    # --------------------------------------------------------------------------
+    - name: Install wheel into isolated release directory
+      ansible.builtin.pip:
+        name: "/tmp/{{ artifact_name }}"
+        virtualenv: "{{ target_release_dir }}"
+        extra_args: "--force-reinstall --no-cache-dir"
+
+    # --------------------------------------------------------------------------
+    # Task 5: Check Current Release to Record for Rollback
+    # --------------------------------------------------------------------------
+    - name: Check existing current symlink target
+      ansible.builtin.stat:
+        path: "{{ base_dir }}/current"
+      register: current_link_stat
+
+    - name: Update previous pointer if current exists
+      ansible.builtin.file:
+        src: "{{ current_link_stat.stat.lnk_target }}"
+        dest: "{{ base_dir }}/previous"
+        state: link
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      when: current_link_stat.stat.islnk is defined and current_link_stat.stat.islnk
+
+    # --------------------------------------------------------------------------
+    # Task 6: Atomically Cut Over Symlink to New Release
+    # --------------------------------------------------------------------------
+    - name: Atomically switch 'current' symlink to new version
+      ansible.builtin.file:
+        src: "{{ target_release_dir }}"
+        dest: "{{ base_dir }}/current"
+        state: link
+        force: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    # --------------------------------------------------------------------------
+    # Task 7: Ensure Systemd Service Unit is Deployed
+    # --------------------------------------------------------------------------
+    - name: Deploy systemd unit definition
+      ansible.builtin.template:
+        src: order-service.service.j2
+        dest: /etc/systemd/system/order-service.service
+        owner: root
+        group: root
+        mode: '0644'
+      become: true
+
+    # --------------------------------------------------------------------------
+    # Task 8: Restart Daemon to Load the New Inode
+    # --------------------------------------------------------------------------
+    - name: Restart daemon against updated current symlink
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      become: true
+
+    # --------------------------------------------------------------------------
+    # Task 9: Verify Daemon Health
+    # --------------------------------------------------------------------------
+    - name: Probe live HTTP endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080/healthz"
+        status_code: 200
+        return_content: true
+      register: health_result
+      retries: 3
+      delay: 1
+      until: health_result.status == 200
+
+    - name: Output release confirmation
+      ansible.builtin.debug:
+        msg: "Successfully promoted {{ release_version }} to {{ inventory_hostname }}. Active link: {{ target_release_dir }}"
