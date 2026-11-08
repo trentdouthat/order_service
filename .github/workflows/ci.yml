@@ -1,0 +1,41 @@
+name: Order Service Continuous Integration
+
+# Triggers: Run automatically on pushes to master or pull requests against master
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test-and-verify:
+    name: Run Test Matrices & Package Artifact
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository source code from Git
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Step 2: Install Astral 'uv' package manager
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "latest"
+
+      # Step 3: Set up deterministic Python runtime
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      # Step 4: Install locked dependencies
+      - name: Install dependencies from uv.lock
+        run: uv sync --frozen
+
+      # Step 5: Execute full pytest test suite (Validator + Matching Engine)
+      - name: Execute pytest suite
+        run: uv run pytest -v
+
+      # Step 6: Verify wheel compilation (Hermetic artifact test)
+      - name: Build immutable wheel artifact
+        run: uv build --wheel
