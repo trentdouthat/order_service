@@ -1,1 +1,1 @@
-Matching Engine Status: MAINTENANCE_MODE_ALICE
+Matching Engine Status: MAINTENANCE_MODE_RESOLVED
