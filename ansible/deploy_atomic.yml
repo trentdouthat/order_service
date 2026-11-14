@@ -8,9 +8,9 @@
   gather_facts: true
 
   vars:
-    release_version: "{{ version | default('0.1.0') }}"
+    release_version: "{{ version | mandatory('Must pass -e version=X.Y.Z') }}"
     artifact_name: "order_service-{{ release_version }}-py3-none-any.whl"
-    artifact_local_path: "dist/{{ artifact_name }}"
+    artifact_local_path: "{{ playbook_dir }}/../dist/{{ artifact_name }}"
     base_dir: "{{ install_dir | default('/opt/order_service') }}"
     releases_dir: "{{ base_dir }}/releases"
     target_release_dir: "{{ releases_dir }}/{{ release_version }}"
@@ -109,16 +109,26 @@
     # --------------------------------------------------------------------------
     # Task 9: Verify Daemon Health
     # --------------------------------------------------------------------------
-    - name: Probe live HTTP endpoint
+    - name: Verify order-service liveness (/healthz)
       ansible.builtin.uri:
         url: "http://127.0.0.1:8080/healthz"
+        method: GET
         status_code: 200
-        return_content: true
-      register: health_result
-      retries: 3
+      register: health_check
+      retries: 5
       delay: 1
-      until: health_result.status == 200
+      until: health_check.status == 200
 
-    - name: Output release confirmation
-      ansible.builtin.debug:
-        msg: "Successfully promoted {{ release_version }} to {{ inventory_hostname }}. Active link: {{ target_release_dir }}"
+    - name: Verify order-service readiness and active release version (/readyz)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8080/readyz"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: ready_check
+      retries: 5
+      delay: 1
+      until: >
+        ready_check.status == 200 and
+        (ready_check.content | from_json).status == 'READY' and
+        (ready_check.content | from_json).version == release_version

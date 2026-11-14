@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Distribution / packaging build artifacts
+.ansible/
 dist/
 build/
 *.egg-info/
