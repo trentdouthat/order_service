@@ -9,6 +9,7 @@
 
   vars:
     base_dir: "{{ install_dir | default('/opt/order_service') }}"
+    service_name: order-service
 
   tasks:
     - name: Inspect previous release pointer
@@ -41,6 +42,9 @@
         status_code: 200
         return_content: true
       register: rollback_health
+      until: rollback_health.status == 200
+      retries: 5
+      delay: 1
 
     - name: Confirm rollback success
       ansible.builtin.debug:
